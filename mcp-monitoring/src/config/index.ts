@@ -4,7 +4,7 @@
 
 export const config = {
   server: {
-    port: parseInt(process.env['MCP_SERVER_PORT'] ?? '9000', 10),
+    port: parseInt(process.env['MCP_SERVER_PORT'] ?? '9003', 10),
     logLevel: process.env['MCP_LOG_LEVEL'] ?? 'info',
     nodeEnv: process.env['NODE_ENV'] ?? 'development',
   },
@@ -33,9 +33,6 @@ export const config = {
     baseUrl: 'https://api.cloudflare.com/client/v4',
   },
 
-  qdrant: {
-    url: process.env['QDRANT_URL'] ?? 'http://localhost:6333',
-  },
 
   host: {
     // Paths mounted read-only from host into container

@@ -2,7 +2,7 @@
 # MCP Monitoring Server - Dockerfile
 # =============================================================================
 # Multi-stage build: builder → production
-# Node.js 22 Slim (Debian) for glibc compatibility (required by onnxruntime)
+# Node.js 22 Slim (Debian)
 # =============================================================================
 
 # ---- Stage 1: Builder ----
@@ -37,10 +37,10 @@ COPY --from=builder /app/dist ./dist
 # Use existing node user for security
 USER node
 
-EXPOSE 9000
+EXPOSE 9003
 
 # Health endpoint check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-  CMD wget -qO- http://localhost:9000/health || exit 1
+  CMD wget -qO- http://localhost:9003/health || exit 1
 
 CMD ["node", "dist/server.js"]

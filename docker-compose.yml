@@ -31,7 +31,6 @@ services:
       RABBITMQ_MONITOR_PASSWORD: ${RABBITMQ_MONITOR_PASSWORD}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
       CLOUDFLARE_ZONE_ID: ${CLOUDFLARE_ZONE_ID}
-      EMAIL_WHITELIST_MONITORING: ${EMAIL_WHITELIST_MONITORING}
     volumes:
       # READ-ONLY host mounts for observability
       - /var/log:/host_logs:ro

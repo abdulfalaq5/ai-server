@@ -21,7 +21,6 @@ import { getRabbitMQStatus } from './tools/rabbitmq.js';
 import { getNginxStatus } from './tools/nginx.js';
 import { getCloudflaredStatus } from './tools/cloudflare.js';
 import { readRecentLogs, getAllowedLogFiles } from './tools/logs.js';
-import { queryHrRules } from './tools/hr.js';
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -41,45 +40,17 @@ function createMcpServer() {
     version: '1.0.0',
   });
 
-  // Set default authentication state for this per-session instance
-  (server as any).authenticated = false;
-  (server as any).email = null;
-  (server as any).roles = [];
+
 
   // Helper to register tools that require specific roles
   const registerSecuredTool = <T extends Record<string, z.ZodType<any>>>(
     name: string,
     description: string,
-    allowedRole: string,
     parameters: T,
     handler: (args: { [K in keyof T]: z.infer<T[K]> }) => Promise<unknown>
   ) => {
     server.tool(name, description, parameters, (async (args: any) => {
-      if (!(server as any).authenticated) {
-        log.warn(`[tool] Blocked unauthorized call to ${name}`);
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              error: "AUTHENTICATION_REQUIRED",
-              message: "Maaf, email tidak terdaftar atau Anda belum login. Anda tidak bisa melanjutkan percakapan ini. Silakan masukkan email yang terdaftar dengan mengetik: /login <email_anda>"
-            }, null, 2)
-          }]
-        };
-      }
 
-      if (!(server as any).roles.includes(allowedRole)) {
-        log.warn(`[tool] Blocked unauthorized call to ${name}. User lacks role: ${allowedRole}`);
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              error: "FORBIDDEN",
-              message: `Maaf, email Anda tidak memiliki izin untuk mengakses konteks ${allowedRole}. Anda hanya bisa mengakses fitur sesuai dengan daftar whitelist email Anda.`
-            }, null, 2)
-          }]
-        };
-      }
       try {
         const result = await handler(args);
         return {
@@ -95,64 +66,11 @@ function createMcpServer() {
     }) as any);
   };
 
-  // ---- Tool: login (UNSECURED) ------------------------------------------------
-  server.tool(
-    'login',
-    'Authenticate the session using your registered email address. Must be called at the very beginning of the chat session to unlock the monitoring or HR tools.',
-    {
-      email: z.string().describe('The email address to login with.'),
-    },
-    (async ({ email }: { email: string }) => {
-      log.info(`[tool] login called with email: ${email}`);
-      
-      const monitoringWhitelistStr = process.env.EMAIL_WHITELIST_MONITORING || '';
-      const hrWhitelistStr = process.env.EMAIL_WHITELIST_HR || '';
-      
-      const monitoringWhitelist = monitoringWhitelistStr.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
-      const hrWhitelist = hrWhitelistStr.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
-      
-      const normalizedEmail = email.toLowerCase();
-      const roles: string[] = [];
-      
-      if (monitoringWhitelist.includes(normalizedEmail)) roles.push('monitoring');
-      if (hrWhitelist.includes(normalizedEmail)) roles.push('hr');
-      
-      if (roles.length > 0) {
-        (server as any).authenticated = true;
-        (server as any).email = email;
-        (server as any).roles = roles;
-        log.info(`[tool] login successful for ${email}. Roles: ${roles.join(', ')}`);
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              status: "success",
-              roles: roles,
-              message: `Login berhasil! Email ${email} terdaftar dengan akses: ${roles.join(', ')}. Anda dapat melanjutkan percakapan sesuai konteks akses Anda.`
-            }, null, 2)
-          }]
-        };
-      } else {
-        log.warn(`[tool] login failed: email ${email} not in any whitelist`);
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              status: "error",
-              message: `Maaf email tidak terdaftar, Anda tidak bisa melanjutkan percakapan ini. Silakan masukkan email yang terdaftar.`
-            }, null, 2)
-          }],
-          isError: true,
-        };
-      }
-    }) as any
-  );
 
   // ---- Tool: get_cpu_usage ---------------------------------------------------
   registerSecuredTool(
     'get_cpu_usage',
     'Read CPU usage statistics from the host including load averages and per-core count. READ-ONLY.',
-    'monitoring',
     {},
     async () => {
       log.info('[tool] get_cpu_usage called');
@@ -164,7 +82,6 @@ function createMcpServer() {
   registerSecuredTool(
     'get_memory_usage',
     'Read memory and swap usage from the host. Returns total, used, free, available, buffers/cache in MB. READ-ONLY.',
-    'monitoring',
     {},
     async () => {
       log.info('[tool] get_memory_usage called');
@@ -176,7 +93,6 @@ function createMcpServer() {
   registerSecuredTool(
     'get_disk_usage',
     'List mounted disk partitions from the host /proc/mounts. READ-ONLY.',
-    'monitoring',
     {},
     async () => {
       log.info('[tool] get_disk_usage called');
@@ -188,7 +104,6 @@ function createMcpServer() {
   registerSecuredTool(
     'get_network_status',
     'Read network interface statistics (bytes, packets, errors) from host /proc/net/dev. READ-ONLY.',
-    'monitoring',
     {},
     async () => {
       log.info('[tool] get_network_status called');
@@ -200,7 +115,6 @@ function createMcpServer() {
   registerSecuredTool(
     'get_docker_containers',
     'List all Docker containers (running and stopped) with their status, image, ports, and networks. READ-ONLY.',
-    'monitoring',
     {
       all: z.boolean().optional().default(true).describe('Include stopped containers (default: true)'),
     },
@@ -214,7 +128,6 @@ function createMcpServer() {
   registerSecuredTool(
     'get_docker_stats',
     'Get live resource stats for all running Docker containers (CPU %, memory, network I/O, block I/O). READ-ONLY.',
-    'monitoring',
     {},
     async () => {
       log.info('[tool] get_docker_stats called');
@@ -226,7 +139,6 @@ function createMcpServer() {
   registerSecuredTool(
     'get_postgres_status',
     'Check PostgreSQL connectivity and read status metrics (version, uptime, connections, DB list). READ-ONLY.',
-    'monitoring',
     {},
     async () => {
       log.info('[tool] get_postgres_status called');
@@ -238,7 +150,6 @@ function createMcpServer() {
   registerSecuredTool(
     'get_rabbitmq_status',
     'Read RabbitMQ cluster status via Management HTTP API (queues, messages, consumers, nodes). READ-ONLY.',
-    'monitoring',
     {},
     async () => {
       log.info('[tool] get_rabbitmq_status called');
@@ -250,7 +161,6 @@ function createMcpServer() {
   registerSecuredTool(
     'get_nginx_status',
     'Check if nginx is running by scanning /proc and reading nginx stub_status endpoint. READ-ONLY.',
-    'monitoring',
     {},
     async () => {
       log.info('[tool] get_nginx_status called');
@@ -262,7 +172,6 @@ function createMcpServer() {
   registerSecuredTool(
     'get_cloudflared_status',
     'Check Cloudflare tunnel status via Cloudflare API (read-only token required). READ-ONLY.',
-    'monitoring',
     {},
     async () => {
       log.info('[tool] get_cloudflared_status called');
@@ -274,7 +183,6 @@ function createMcpServer() {
   registerSecuredTool(
     'read_recent_logs',
     `Read the last N lines from a host log file. Allowed log files: ${getAllowedLogFiles().join(', ')}. Optional filter string. READ-ONLY.`,
-    'monitoring',
     {
       logFile: z
         .enum(getAllowedLogFiles() as [string, ...string[]])
@@ -298,19 +206,6 @@ function createMcpServer() {
     }
   );
 
-  // ---- Tool: query_hr_rules --------------------------------------------------
-  registerSecuredTool(
-    'query_hr_rules',
-    'Search the HR knowledge base (Peraturan Perusahaan) for answers to user questions. Returns relevant excerpts from the document.',
-    'hr',
-    {
-      query: z.string().describe('The user question or keywords to search for in the HR knowledge base.'),
-    },
-    async ({ query }) => {
-      log.info(`[tool] query_hr_rules called with query: ${query}`);
-      return await queryHrRules(query);
-    }
-  );
 
   return server;
 }

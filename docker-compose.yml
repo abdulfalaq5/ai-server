@@ -1,0 +1,62 @@
+# =============================================================================
+# SERVER AI MONITORING - Docker Compose
+# =============================================================================
+# Usage:
+#   cp .env.example .env && nano .env
+#   docker compose up -d
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # MCP Monitoring Server (READ-ONLY)
+  # ---------------------------------------------------------------------------
+  mcp-monitoring:
+    build:
+      context: ./mcp-monitoring
+      dockerfile: Dockerfile
+    container_name: mcp-monitoring
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      MCP_SERVER_PORT: ${MCP_SERVER_PORT:-9003}
+      MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
+      POSTGRES_MONITOR_HOST: ${POSTGRES_MONITOR_HOST}
+      POSTGRES_MONITOR_PORT: ${POSTGRES_MONITOR_PORT:-5432}
+      POSTGRES_MONITOR_DB: ${POSTGRES_MONITOR_DB:-postgres}
+      POSTGRES_MONITOR_USER: ${POSTGRES_MONITOR_USER}
+      POSTGRES_MONITOR_PASSWORD: ${POSTGRES_MONITOR_PASSWORD}
+      RABBITMQ_MONITOR_HOST: ${RABBITMQ_MONITOR_HOST}
+      RABBITMQ_MONITOR_PORT: ${RABBITMQ_MONITOR_PORT:-15672}
+      RABBITMQ_MONITOR_USER: ${RABBITMQ_MONITOR_USER}
+      RABBITMQ_MONITOR_PASSWORD: ${RABBITMQ_MONITOR_PASSWORD}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+      CLOUDFLARE_ZONE_ID: ${CLOUDFLARE_ZONE_ID}
+      EMAIL_WHITELIST_MONITORING: ${EMAIL_WHITELIST_MONITORING}
+    volumes:
+      # READ-ONLY host mounts for observability
+      - /var/log:/host_logs:ro
+      - /proc:/host_proc:ro
+      - /sys:/host_sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "${MCP_SERVER_PORT:-9003}:${MCP_SERVER_PORT:-9003}"
+    networks:
+      - infra_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:$${MCP_SERVER_PORT:-9003}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    read_only: false   # app writes to its own /tmp only; host mounts are :ro
+    tmpfs:
+      - /tmp:size=50m,mode=1777
+
+
+
+networks:
+  infra_net:
+    external: true
+    name: infra_net

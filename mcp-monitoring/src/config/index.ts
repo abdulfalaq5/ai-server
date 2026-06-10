@@ -9,6 +9,12 @@ export const config = {
     nodeEnv: process.env['NODE_ENV'] ?? 'development',
   },
 
+  openai: {
+    apiKey: process.env['OPENAI_API_KEY'] ?? '',
+    baseUrl: process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1',
+    model: process.env['OPENAI_MODEL'] ?? 'gpt-4o',
+  },
+
   postgres: {
     host: process.env['POSTGRES_MONITOR_HOST'] ?? 'localhost',
     port: parseInt(process.env['POSTGRES_MONITOR_PORT'] ?? '5432', 10),

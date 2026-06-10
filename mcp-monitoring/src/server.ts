@@ -11,6 +11,7 @@ import { z } from 'zod';
 import crypto from 'crypto';
 
 import { config } from './config/index.js';
+import { agentService } from './agent/agent.service.js';
 import { getCpuUsage } from './tools/cpu.js';
 import { getMemoryUsage } from './tools/memory.js';
 import { getDiskUsage } from './tools/disk.js';
@@ -253,6 +254,27 @@ app.all('/mcp', async (req: Request, res: Response) => {
 
   if (session.transport.sessionId && !sessions.has(session.transport.sessionId)) {
     sessions.set(session.transport.sessionId, session);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Agent REST endpoint (for AI-SPV forwarding)
+// ---------------------------------------------------------------------------
+app.post('/ask', async (req: Request, res: Response) => {
+  const question = req.body.question;
+  if (!question || typeof question !== 'string') {
+    res.status(400).json({ error: 'Missing or invalid "question" in request body' });
+    return;
+  }
+
+  log.info(`[AGENT] Received question: ${question}`);
+  
+  try {
+    const answer = await agentService.ask(question);
+    res.json({ answer });
+  } catch (error: any) {
+    log.error(`[AGENT] Error answering question: ${error.message}`);
+    res.status(500).json({ error: 'Internal server error while processing question.' });
   }
 });
 

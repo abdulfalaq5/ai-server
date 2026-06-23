@@ -39,6 +39,18 @@ export const config = {
     baseUrl: 'https://api.cloudflare.com/client/v4',
   },
 
+  spv: {
+    // ai-spv endpoint that receives alert notifications from ai-server
+    endpoint: process.env['AI_SPV_ENDPOINT'] ?? 'http://ai-spv:9002',
+  },
+
+  alert: {
+    // path for persisting alert rules (mounted as Docker volume)
+    dataPath: process.env['ALERT_DATA_PATH'] ?? '/data/alert-rules.json',
+    // how often to collect metrics and evaluate rules (seconds)
+    intervalSeconds: parseInt(process.env['ALERT_INTERVAL_SECONDS'] ?? '30', 10),
+  },
+
 
   host: {
     // Paths mounted read-only from host into container

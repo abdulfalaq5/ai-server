@@ -22,6 +22,7 @@ import { getRabbitMQStatus } from './tools/rabbitmq.js';
 import { getNginxStatus } from './tools/nginx.js';
 import { getCloudflaredStatus } from './tools/cloudflare.js';
 import { readRecentLogs, getAllowedLogFiles } from './tools/logs.js';
+import { alertScheduler } from './services/alert-scheduler.service.js';
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -299,4 +300,22 @@ app.listen(port, '0.0.0.0', () => {
   log.info(`MCP endpoint:    http://0.0.0.0:${port}/mcp`);
   log.info(`Log level:       ${config.server.logLevel}`);
   log.info(`Environment:     ${config.server.nodeEnv}`);
+
+  // Start the alert monitoring + notification pipeline
+  alertScheduler.start().catch(err => {
+    log.error('Failed to start alert scheduler:', err.message);
+  });
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  log.info('SIGTERM received — shutting down gracefully...');
+  alertScheduler.stop();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  log.info('SIGINT received — shutting down gracefully...');
+  alertScheduler.stop();
+  process.exit(0);
 });

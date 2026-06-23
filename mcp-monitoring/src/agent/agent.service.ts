@@ -10,6 +10,8 @@ import { getRabbitMQStatus } from '../tools/rabbitmq.js';
 import { getNginxStatus } from '../tools/nginx.js';
 import { getCloudflaredStatus } from '../tools/cloudflare.js';
 import { readRecentLogs } from '../tools/logs.js';
+import { alertRepository } from '../services/alert-repository.service.js';
+import { ruleEngine } from '../services/rule-engine.service.js';
 
 export class AgentService {
   private openai: OpenAI;
@@ -60,6 +62,68 @@ export class AgentService {
           }
         }
       },
+      // ---- Alert Management Tools ----
+      {
+        type: 'function',
+        function: {
+          name: 'create_alert',
+          description: 'Buat alert rule baru untuk memantau metrik server (CPU, memory, disk). Gunakan ini jika user meminta notifikasi atau alert ketika metrik tertentu mencapai threshold.',
+          parameters: {
+            type: 'object',
+            properties: {
+              metric: { type: 'string', enum: ['cpu', 'memory', 'disk', 'load'], description: 'Metrik yang dipantau' },
+              threshold: { type: 'number', description: 'Ambang batas dalam persen (misalnya: 70, 80, 90)' },
+              comparison: { type: 'string', enum: ['gte', 'lte'], description: 'gte = lebih besar atau sama dengan (>=), lte = lebih kecil atau sama dengan (<=). Default: gte' },
+              sustained_minutes: { type: 'number', description: 'Kondisi harus berlangsung selama N menit sebelum alert dikirim. 0 = langsung dikirim. Default: 0' },
+              cooldown_minutes: { type: 'number', description: 'Minimum jeda menit antara notifikasi yang sama. Default: 15' },
+              severity: { type: 'string', enum: ['warning', 'critical'], description: 'Tingkat keparahan: warning atau critical. Default: warning' },
+              name: { type: 'string', description: 'Nama rule (opsional, akan di-generate otomatis jika tidak diisi)' },
+            },
+            required: ['metric', 'threshold'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'list_alerts',
+          description: 'Tampilkan semua alert rule yang aktif dan tidak aktif.',
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'update_alert',
+          description: 'Update/ubah konfigurasi alert rule yang sudah ada berdasarkan ID.',
+          parameters: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'ID alert rule yang akan diubah' },
+              threshold: { type: 'number', description: 'Ambang batas baru (opsional)' },
+              enabled: { type: 'boolean', description: 'Aktifkan atau nonaktifkan rule (opsional)' },
+              sustained_minutes: { type: 'number', description: 'Ubah sustained_minutes (opsional)' },
+              cooldown_minutes: { type: 'number', description: 'Ubah cooldown_minutes (opsional)' },
+              severity: { type: 'string', enum: ['warning', 'critical'], description: 'Ubah severity (opsional)' },
+            },
+            required: ['id'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'delete_alert',
+          description: 'Hapus alert rule berdasarkan ID, atau hapus semua rule sekaligus.',
+          parameters: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'ID alert rule yang akan dihapus. Gunakan "all" untuk hapus semua.' },
+            },
+            required: ['id'],
+          },
+        },
+      },
     ];
   }
 
@@ -78,6 +142,67 @@ export class AgentService {
         case 'get_nginx_status': return await getNginxStatus();
         case 'get_cloudflared_status': return await getCloudflaredStatus();
         case 'read_recent_logs': return await readRecentLogs({ logFile: args.logFile, lines: args.lines });
+
+        // ---- Alert Management ----
+        case 'create_alert': {
+          const metricLabel: Record<string, string> = { cpu: 'CPU', memory: 'Memory/RAM', disk: 'Disk', load: 'Load Average' };
+          const autoName = args.name || `${metricLabel[args.metric] ?? args.metric} ${args.comparison === 'lte' ? '<=' : '>='} ${args.threshold}%`;
+          const rule = alertRepository.create({
+            name: autoName,
+            metric: args.metric,
+            threshold: args.threshold,
+            comparison: args.comparison ?? 'gte',
+            sustained_minutes: args.sustained_minutes ?? 0,
+            cooldown_minutes: args.cooldown_minutes ?? 15,
+            severity: args.severity ?? 'warning',
+          });
+          const sustainedDesc = rule.sustained_minutes > 0
+            ? ` selama minimal ${rule.sustained_minutes} menit`
+            : '';
+          return {
+            success: true,
+            message: `✅ Alert rule berhasil dibuat!\n- Nama: ${rule.name}\n- Metrik: ${metricLabel[rule.metric] ?? rule.metric}\n- Threshold: ${rule.threshold}%${sustainedDesc}\n- Cooldown: ${rule.cooldown_minutes} menit\n- Severity: ${rule.severity}\n- ID: ${rule.id}`,
+            rule,
+          };
+        }
+
+        case 'list_alerts': {
+          const rules = alertRepository.getAll();
+          if (rules.length === 0) {
+            return { success: true, message: 'Tidak ada alert rule yang terdaftar.', rules: [] };
+          }
+          const list = rules.map((r, i) =>
+            `${i + 1}. ${r.enabled ? '🟢' : '🔴'} **${r.name}** (${r.severity.toUpperCase()})\n   Metrik: ${r.metric} ${r.comparison === 'gte' ? '>=' : '<='} ${r.threshold}%` +
+            (r.sustained_minutes > 0 ? ` selama ${r.sustained_minutes} menit` : '') +
+            `\n   Cooldown: ${r.cooldown_minutes} menit | ID: ${r.id}`
+          ).join('\n\n');
+          return { success: true, message: `📋 Alert Rules (${rules.length} total):\n\n${list}`, rules };
+        }
+
+        case 'update_alert': {
+          const updated = alertRepository.update(args.id, {
+            ...(args.threshold !== undefined && { threshold: args.threshold }),
+            ...(args.enabled !== undefined && { enabled: args.enabled }),
+            ...(args.sustained_minutes !== undefined && { sustained_minutes: args.sustained_minutes }),
+            ...(args.cooldown_minutes !== undefined && { cooldown_minutes: args.cooldown_minutes }),
+            ...(args.severity !== undefined && { severity: args.severity }),
+          });
+          if (!updated) return { success: false, message: `Rule dengan ID ${args.id} tidak ditemukan.` };
+          ruleEngine.resetState(args.id);
+          return { success: true, message: `✅ Alert rule "${updated.name}" berhasil diperbarui.`, rule: updated };
+        }
+
+        case 'delete_alert': {
+          if (args.id === 'all') {
+            const count = alertRepository.deleteAll();
+            return { success: true, message: `✅ Semua ${count} alert rule berhasil dihapus.` };
+          }
+          const deleted = alertRepository.delete(args.id);
+          if (!deleted) return { success: false, message: `Rule dengan ID ${args.id} tidak ditemukan.` };
+          ruleEngine.resetState(args.id);
+          return { success: true, message: `✅ Alert rule dengan ID ${args.id} berhasil dihapus.` };
+        }
+
         default: return { error: `Tool ${name} not found` };
       }
     } catch (error: any) {

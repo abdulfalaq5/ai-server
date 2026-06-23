@@ -34,6 +34,9 @@ RUN npm install --omit=dev && npm cache clean --force
 # Copy compiled output from builder
 COPY --from=builder /app/dist ./dist
 
+# Create data directory for alerts and set permissions
+RUN mkdir -p /data && chown -R node:node /data
+
 # Use existing node user for security
 USER node
 

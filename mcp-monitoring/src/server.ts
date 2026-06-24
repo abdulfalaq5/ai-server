@@ -279,6 +279,61 @@ app.post('/ask', async (req: Request, res: Response) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Metrics Snapshot endpoint — digunakan oleh WeCom monitoring scheduler di ai-spv
+// GET /metrics/snapshot → { cpu, memory, disk } dalam satu request ringan (tanpa LLM)
+// ---------------------------------------------------------------------------
+app.get('/metrics/snapshot', async (_req: Request, res: Response) => {
+  try {
+    const [cpuResult, memResult, diskResult] = await Promise.all([
+      getCpuUsage(),
+      getMemoryUsage(),
+      getDiskUsage(),
+    ]);
+
+    // Build disk partitions
+    const partitions: Array<{ mountpoint: string; used_percent: number }> = [];
+    if (diskResult.data && Array.isArray(diskResult.data)) {
+      for (const p of diskResult.data as any[]) {
+        if (p.mountpoint && p.usedPercent !== undefined) {
+          partitions.push({ mountpoint: p.mountpoint, used_percent: p.usedPercent });
+        }
+      }
+    }
+    const maxDiskPercent = partitions.length > 0
+      ? Math.max(...partitions.map(p => p.used_percent))
+      : 0;
+
+    const snapshot = {
+      timestamp: new Date().toISOString(),
+      cpu: {
+        total_percent: cpuResult.data?.loadAvg?.oneMin
+          ? Math.min((cpuResult.data.loadAvg.oneMin / (cpuResult.data?.cores ?? 1)) * 100, 100)
+          : (cpuResult.data?.totalPercent ?? 0),
+        load_avg_1m: cpuResult.data?.loadAvg?.oneMin ?? 0,
+        load_avg_5m: cpuResult.data?.loadAvg?.fiveMin ?? 0,
+        cores: cpuResult.data?.cores ?? 1,
+      },
+      memory: {
+        used_percent: memResult.data?.usedPercent ?? 0,
+        used_mb: memResult.data?.usedMb ?? 0,
+        total_mb: memResult.data?.totalMb ?? 0,
+      },
+      disk: {
+        max_used_percent: maxDiskPercent,
+        partitions,
+      },
+    };
+
+    log.info(`[SNAPSHOT] CPU=${snapshot.cpu.total_percent.toFixed(1)}% MEM=${snapshot.memory.used_percent.toFixed(1)}% DISK=${snapshot.disk.max_used_percent.toFixed(1)}%`);
+    res.json(snapshot);
+  } catch (error: any) {
+    log.error(`[SNAPSHOT] Error collecting metrics: ${error.message}`);
+    res.status(500).json({ error: 'Failed to collect metrics snapshot.' });
+  }
+});
+
+
 // 404 handler
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: 'Not Found' });
